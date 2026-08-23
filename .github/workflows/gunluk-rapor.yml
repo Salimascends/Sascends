@@ -1,0 +1,27 @@
+name: BIST Günlük Piyasa Raporu
+
+on:
+  schedule:
+    - cron: "0 4 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  rapor-gonder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Kütüphaneleri kur
+        run: pip install -r requirements.txt
+
+      - name: Raporu çalıştır ve gönder
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bist_telegram_bot.py
