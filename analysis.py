@@ -1,6 +1,7 @@
 """Ortak fonksiyonlar: analiz ve Telegram gönderimi."""
 
 import os
+import time
 import yfinance as yf
 import pandas as pd
 import requests
@@ -30,24 +31,43 @@ def calc_rsi(series: pd.Series, period: int = 14):
     return rsi.iloc[-1] if not rsi.empty else None
 
 
+def _fetch_history(t, retries: int = 2):
+    """Yahoo Finance bazen boş/eksik veri döndürüyor; birkaç kez dener."""
+    for attempt in range(retries + 1):
+        hist = t.history(period="3mo")
+        if not hist.empty and not pd.isna(hist["Close"].iloc[-1]):
+            return hist
+        time.sleep(2)
+    return hist
+
+
 def analyze_ticker(ticker: str) -> str:
     try:
         t = yf.Ticker(ticker)
         info = t.info
-        hist = t.history(period="3mo")
+        hist = _fetch_history(t)
 
-        if hist.empty:
-            return f"⚠️ <b>{ticker}</b>: fiyat verisi alınamadı (kod yanlış olabilir)"
+        if hist.empty or pd.isna(hist["Close"].iloc[-1]):
+            return f"⚠️ <b>{ticker}</b>: fiyat verisi şu an alınamadı (Yahoo Finance geçici olarak veri döndürmedi, birazdan tekrar dene)"
 
         price = hist["Close"].iloc[-1]
-        sma20 = hist["Close"].rolling(20).mean().iloc[-1]
+        sma20_series = hist["Close"].rolling(20).mean()
+        sma20 = sma20_series.iloc[-1] if len(hist) >= 20 else None
         rsi = calc_rsi(hist["Close"])
+        if rsi is not None and pd.isna(rsi):
+            rsi = None
+        if sma20 is not None and pd.isna(sma20):
+            sma20 = None
 
         pe = info.get("trailingPE")
         fwd_pe = info.get("forwardPE")
         pb = info.get("priceToBook")
 
-        trend = "🔼 Yükseliş eğiliminde" if price > sma20 else "🔽 Düşüş eğiliminde"
+        if sma20 is not None:
+            trend = "🔼 Yükseliş eğiliminde" if price > sma20 else "🔽 Düşüş eğiliminde"
+        else:
+            trend = "yetersiz veri (henüz 20 günlük geçmiş yok)"
+
         if rsi is None:
             rsi_yorum = "hesaplanamadı"
         elif rsi > 70:
@@ -63,7 +83,7 @@ def analyze_ticker(ticker: str) -> str:
             f"F/K: {pe:.2f}" if pe else "F/K: veri yok",
             f"Tahmini F/K: {fwd_pe:.2f}" if fwd_pe else None,
             f"PD/DD: {pb:.2f}" if pb else None,
-            f"SMA20: {sma20:.2f} TL — {trend}",
+            f"SMA20: {sma20:.2f} TL — {trend}" if sma20 is not None else f"SMA20: {trend}",
             f"RSI(14): {rsi:.1f} ({rsi_yorum})" if rsi is not None else None,
         ]
         return "\n".join(l for l in lines if l)
